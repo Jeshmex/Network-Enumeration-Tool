@@ -1,8 +1,8 @@
-First Open Linux Terminal & Update Package Repo
+#First Open Linux Terminal & Update Package Repo
 sudo apt update
 
-Install Nmap Using The Following Command
+#Install Nmap Using The Following Command
 sudo apt install nmap -y
 
-Check Version history
+#Check Version history
 nmap --version  
