@@ -65,7 +65,6 @@ def save_last_ip(ip):
 
 def validate_ip(ip):
     try:
-        # Support both single IPs and CIDR notation (e.g., 192.168.1.0/24)
         if "/" in ip:
             ipaddress.ip_network(ip, strict=False)
         else:
@@ -81,12 +80,15 @@ def check_nmap():
     return True
 
 # -----------------------------------
-# Run Scan
+# Run Scan (Enhanced Version)
 # -----------------------------------
 
 def run_scan(scan_command, target):
-    # Combine the base command with the target and progress flags
-    command = scan_command + ["--stats-every", "5s", target]
+    # Log file for the user to keep results
+    log_filename = f"scan_{target.replace('/', '_')}_{int(time.time())}.txt"
+    
+    # We add --stats-every to get progress updates from Nmap
+    command = scan_command + ["--stats-every", "3s", target]
 
     console.print(f"\n[bold cyan]Targeting:[/bold cyan] [white]{target}[/white]")
     console.print(f"[bold cyan]Command:[/bold cyan] [dim]{' '.join(command)}[/dim]\n")
@@ -110,26 +112,53 @@ def run_scan(scan_command, target):
             bufsize=1
         )
 
-        for line in process.stdout:
-            # Print live Nmap output
-            console.print(f"  [dim]{line.strip()}[/dim]")
+        console.print("\n[bold yellow]--- Live Scan Results ---[/bold yellow]")
+        
+        with open(log_filename, "w") as log_file:
+            for line in process.stdout:
+                clean_line = line.strip()
+                if not clean_line: continue
+                
+                # Write every line to the log file for later review
+                log_file.write(clean_line + "\n")
 
-            # Extract progress percentage from nmap output
-            match = re.search(r"(\d+\.\d+)% done", line)
-            if match:
-                percent = float(match.group(1))
-                progress.update(task, completed=percent)
+                # 1. Handle Progress Updates (Don't print these to screen)
+                match = re.search(r"(\d+\.\d+)% done", clean_line)
+                if match:
+                    percent = float(match.group(1))
+                    progress.update(task, completed=percent)
+                    continue
+
+                # 2. Highlight Port Information (The part you needed!)
+                # This matches lines like "80/tcp open  http"
+                if re.match(r"^\d+/(tcp|udp)", clean_line):
+                    console.print(f"[bold green]PORT FOUND: {clean_line}[/bold green]")
+                
+                # 3. Highlight OS and Service Details
+                elif "OS details:" in clean_line or "Service Info:" in clean_line:
+                    console.print(f"[bold magenta]➔ {clean_line}[/bold magenta]")
+                
+                # 4. Highlight Script Results (from Option 4)
+                elif clean_line.startswith("|"):
+                    console.print(f"  [cyan]{clean_line}[/cyan]")
+                
+                # 5. Print standard output in dim
+                else:
+                    # Filter out the boring "Stats" lines to keep terminal clean
+                    if "Stats:" not in clean_line:
+                        console.print(f"  [dim]{clean_line}[/dim]")
 
         process.wait()
         progress.update(task, completed=100)
 
     if process.returncode != 0:
-        console.print("\n[bold red]Scan failed.[/bold red] You might need to run this as sudo for certain scans (like Stealth or OS Detection).")
+        console.print(f"\n[bold red]Scan failed.[/bold red] Run as sudo/admin for advanced scans.")
     else:
-        console.print("\n[bold green]Scan complete![/bold green]\n")
+        console.print(f"\n[bold green]Scan complete![/bold green]")
+        console.print(f"Detailed report saved to: [bold white]{log_filename}[/bold white]\n")
 
 # -----------------------------------
-# Explanation Mode
+# Explanation & Menu UI
 # -----------------------------------
 
 def explain_scans():
@@ -139,10 +168,6 @@ def explain_scans():
         console.print(f"   Command: {' '.join(data['command'])}")
         console.print(f"   What it does: {data['description']}\n")
     input("Press Enter to return to menu...")
-
-# -----------------------------------
-# Banner & Menu
-# -----------------------------------
 
 def print_banner():
     banner = """
@@ -171,48 +196,32 @@ def menu():
 
     choice = Prompt.ask("\nSelect a scan option").strip().lower()
 
-    if choice == "x":
+    if choice == 'x':
         console.print("[bold red]Exiting...[/bold red]")
         exit()
-
-    if choice == "e":
+    if choice == 'e':
         explain_scans()
         return
 
     if choice in SCANS:
         last_ip = load_last_ip()
+        prompt_msg = f"Enter target IP (or 'r' for {last_ip})" if last_ip else "Enter target IP"
         
-        # --- The 'r' to use Last IP Logic ---
-        if last_ip:
-            prompt_msg = f"Enter target IP or subnet (or press [bold magenta]'r'[/bold magenta] for {last_ip})"
-        else:
-            prompt_msg = "Enter target IP or subnet"
-
         target_input = Prompt.ask(prompt_msg).strip()
+        ip = last_ip if target_input.lower() == 'r' and last_ip else target_input
 
-        if target_input.lower() == 'r' and last_ip:
-            ip = last_ip
-        else:
-            ip = target_input
-            if not validate_ip(ip):
-                console.print("[bold red]Invalid IP or subnet format.[/bold red]")
-                time.sleep(2)
-                return
-            save_last_ip(ip)
-
-        if not check_nmap():
+        if not validate_ip(ip):
+            console.print("[bold red]Invalid IP format.[/bold red]")
             time.sleep(2)
             return
-
-        run_scan(SCANS[choice]["command"], ip)
-        input("\nPress Enter to return to menu...")
+        
+        save_last_ip(ip)
+        if check_nmap():
+            run_scan(SCANS[choice]["command"], ip)
+            input("\nPress Enter to return to menu...")
     else:
         console.print("[bold red]Invalid selection.[/bold red]")
         time.sleep(1.5)
-
-# -----------------------------------
-# Entry
-# -----------------------------------
 
 if __name__ == "__main__":
     while True:
